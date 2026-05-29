@@ -1,17 +1,15 @@
 import fetch from 'node-fetch';
 
-const BASE_SEARCH_PARAMS = {
-  app_caller_origin: 'default',
-  country_code: 'us',
-  language: 'en',
-  app_version: '2026.21.0',
-  os_version: '26.5',
-  app_phone: 'iPhone17,1',
-  app_platform: 'iphone',
-  state: 'fl',
-};
+// The Vivino website embeds full search results as JSON in the page HTML
+// under the key "initialExploreResults". No authentication required.
+const SEARCH_BASE = 'https://www.vivino.com/search/wines';
 
-const BASE_PRICE_PARAMS = {
+// The price API returns median market prices. Also works without auth.
+const PRICE_URL = 'https://api.vivino.com/v/9.0.0/vintages/_prices';
+
+const MAX_RESULTS = 5;
+
+const PRICE_PARAMS = {
   app_caller_origin: 'default',
   country: 'us',
   country_code: 'us',
@@ -23,155 +21,167 @@ const BASE_PRICE_PARAMS = {
   state: 'Florida',
 };
 
-const ANON_UUID = 'B3C4D5E6-AAAA-BBBB-CCCC-000000000000';
-const MIAMI_LAT = '25.7617';
-const MIAMI_LON = '-80.1918';
-
-const SEARCH_URL = 'https://api.vivino.com/v13/events/search';
-const PRICE_URL = 'https://api.vivino.com/v/9.0.0/vintages/_prices';
-const MAX_RESULTS = 5;
-
 function buildQueryString(params) {
   return Object.entries(params)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v))
     .join('&');
 }
 
-async function callSearchApi(wineName, includeLocation) {
-  const params = { ...BASE_SEARCH_PARAMS, uuid: ANON_UUID };
-  if (includeLocation) {
-    params.location_latitude = MIAMI_LAT;
-    params.location_longitude = MIAMI_LON;
-    params.location_accuracy = '10';
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+// Extract the "initialExploreResults" JSON blob embedded in the page HTML.
+// The page encodes it as HTML entities inside a script/data attribute.
+function extractEmbeddedResults(html) {
+  const decoded = decodeHtmlEntities(html);
+  const marker = '"initialExploreResults":';
+  const start = decoded.indexOf(marker);
+  if (start === -1) return null;
+
+  // Walk forward from the opening brace to find the matching closing brace
+  let objStart = decoded.indexOf('{', start + marker.length);
+  if (objStart === -1) return null;
+
+  let depth = 0, i = objStart;
+  for (; i < decoded.length; i++) {
+    if (decoded[i] === '{') depth++;
+    else if (decoded[i] === '}') {
+      depth--;
+      if (depth === 0) break;
+    }
   }
 
-  const response = await fetch(`${SEARCH_URL}?${buildQueryString(params)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: wineName }),
+  try {
+    return JSON.parse(decoded.slice(objStart, i + 1));
+  } catch (_) {
+    return null;
+  }
+}
+
+async function fetchSearchPage(wineName) {
+  const url = SEARCH_BASE + '?q=' + encodeURIComponent(wineName);
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
   });
 
   if (!response.ok) {
-    throw new Error(`Search API responded with ${response.status}`);
+    throw new Error('Vivino search page returned ' + response.status);
   }
 
-  return response.json();
+  return response.text();
 }
 
-function parseSearchResults(data) {
-  const raw = data.results || data.matches || data.wines || data.vintages || [];
-  if (!Array.isArray(raw)) return [];
+function parseMatches(results) {
+  if (!results || !Array.isArray(results.matches)) return [];
 
   const wines = [];
-  for (const item of raw) {
-    if (wines.length >= MAX_RESULTS) break;
+  for (var i = 0; i < results.matches.length && wines.length < MAX_RESULTS; i++) {
+    var match = results.matches[i];
+    var vintage = match.vintage;
+    if (!vintage || !vintage.id) continue;
 
-    const vintage = item.vintage || item;
-    const wine = vintage.wine || item.wine || {};
+    var stats = vintage.statistics || {};
+    var ratingsAverage = stats.ratings_average != null ? stats.ratings_average : null;
+    var ratingsCount = stats.ratings_count != null ? stats.ratings_count : 0;
 
-    const id = vintage.id || item.id;
-    if (!id) continue;
+    var imageObj = vintage.image || {};
+    var variations = imageObj.variations || {};
+    // Prefer bottle_medium (clean white background), fall back to label
+    var imageUrl = variations.bottle_medium || variations.bottle_small || imageObj.location || '';
+    // Ensure protocol
+    if (imageUrl && imageUrl.indexOf('//') === 0) imageUrl = 'https:' + imageUrl;
 
-    const name = vintage.name || wine.name || item.name || '';
-    if (!name) continue;
-
-    const ratingsAverage = wine.ratings_average != null ? wine.ratings_average
-      : vintage.ratings_average != null ? vintage.ratings_average
-      : item.ratings_average != null ? item.ratings_average
-      : null;
-    const ratingsCount = wine.ratings_count != null ? wine.ratings_count
-      : vintage.ratings_count != null ? vintage.ratings_count
-      : item.ratings_count != null ? item.ratings_count
-      : 0;
-
-    const imageObj = vintage.image || wine.image || item.image || {};
-    const rawImageUrl = imageObj.location || imageObj.url || '';
-    const imageUrl = rawImageUrl ? rawImageUrl.replace('/thumbs/', '/x600-/') : '';
-
-    const seoName = wine.seo_name || vintage.seo_name || '';
-    const vintageYear = vintage.year || '';
-    const wineUrl = seoName
-      ? `https://www.vivino.com/wines/${seoName}${vintageYear ? `/${vintageYear}` : ''}`
+    var wine = vintage.wine || {};
+    // vintage.seo_name includes the year (e.g. "opus-one-opus-one-2016")
+    // wine.seo_name is the generic label — prefer the vintage-specific one
+    var seoName = vintage.seo_name || wine.seo_name || '';
+    var wineUrl = seoName
+      ? 'https://www.vivino.com/wines/' + seoName
       : '';
 
-    wines.push({ id: String(id), name, ratingsAverage, ratingsCount, imageUrl, wineUrl });
+    // Best available price is already embedded in the match
+    var bestPrice = null;
+    if (match.price && match.price.amount != null) {
+      bestPrice = parseFloat(match.price.amount).toFixed(2);
+    }
+
+    wines.push({
+      id: String(vintage.id),
+      name: vintage.name || wine.name || '',
+      ratingsAverage: ratingsAverage,
+      ratingsCount: ratingsCount,
+      imageUrl: imageUrl,
+      wineUrl: wineUrl,
+      bestPrice: bestPrice,
+    });
   }
 
   return wines;
 }
 
-async function callPriceApi(vintageIds, includeLocation) {
-  const params = {
-    ...BASE_PRICE_PARAMS,
-    uuid: ANON_UUID,
-    vintage_ids: vintageIds.join(','),
-  };
-  if (includeLocation) {
-    params.location_latitude = MIAMI_LAT;
-    params.location_longitude = MIAMI_LON;
-    params.location_accuracy = '10';
-  }
+async function fetchMedianPrices(vintageIds) {
+  if (!vintageIds.length) return {};
 
-  const response = await fetch(`${PRICE_URL}?${buildQueryString(params)}`, {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json' },
+  var params = Object.assign({}, PRICE_PARAMS, {
+    vintage_ids: vintageIds.join(','),
   });
 
+  var response = await fetch(PRICE_URL + '?' + buildQueryString(params));
   if (!response.ok) return {};
 
-  const data = await response.json();
-  const source = data.vintages || data;
-  const priceMap = {};
+  var data = await response.json();
+  var source = data.vintages || data;
+  var priceMap = {};
 
-  for (const [vid, info] of Object.entries(source)) {
+  var keys = Object.keys(source);
+  for (var j = 0; j < keys.length; j++) {
+    var vid = keys[j];
+    var info = source[vid];
     if (!info || typeof info !== 'object') continue;
-    const median = (info.median && info.median.amount != null) ? info.median.amount : null;
-    const best = (info.price && info.price.amount != null) ? info.price.amount : null;
-    priceMap[vid] = {
-      median: median !== null ? parseFloat(median).toFixed(2) : null,
-      best: best !== null ? parseFloat(best).toFixed(2) : null,
-    };
+    var median = (info.median && info.median.amount != null) ? parseFloat(info.median.amount).toFixed(2) : null;
+    priceMap[vid] = median;
   }
 
   return priceMap;
 }
 
 export default async function search(wineName) {
-  let searchData;
+  var html = await fetchSearchPage(wineName);
+  var results = extractEmbeddedResults(html);
 
-  try {
-    searchData = await callSearchApi(wineName, false);
-    const wines = parseSearchResults(searchData);
-
-    if (!wines.length) {
-      searchData = await callSearchApi(wineName, true);
-    }
-  } catch (_) {
-    searchData = await callSearchApi(wineName, true);
+  if (!results) {
+    throw new Error('Could not find embedded results in Vivino search page');
   }
 
-  const wines = parseSearchResults(searchData);
+  var wines = parseMatches(results);
   if (!wines.length) return [];
 
-  const vintageIds = wines.map(w => w.id);
+  var vintageIds = wines.map(function(w) { return w.id; });
 
-  let priceMap = {};
+  var medianMap = {};
   try {
-    priceMap = await callPriceApi(vintageIds, false);
-    const hasAny = Object.keys(priceMap).length > 0;
-    if (!hasAny) {
-      priceMap = await callPriceApi(vintageIds, true);
-    }
+    medianMap = await fetchMedianPrices(vintageIds);
   } catch (_) {
-    try {
-      priceMap = await callPriceApi(vintageIds, true);
-    } catch (_2) {
-      priceMap = {};
-    }
+    medianMap = {};
   }
 
-  return wines.map(wine => ({
-    ...wine,
-    pricing: priceMap[wine.id] || { median: null, best: null },
-  }));
+  return wines.map(function(wine) {
+    return Object.assign({}, wine, {
+      pricing: {
+        median: medianMap[wine.id] || null,
+        best: wine.bestPrice,
+      },
+    });
+  });
 }
