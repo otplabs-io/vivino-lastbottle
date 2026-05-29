@@ -1,223 +1,448 @@
-import getRating from "./api/getRating";
-import getPrice from "./api/getPrice";
+import search from './api/search';
 
+const SIDEBAR_WIDTH = '300px';
+const SIDEBAR_ID = 'vivino-sidebar-host';
 
-function initializeScript() {
-  //Only initialize on homepage of lastbottlewines.com or details page for previous listings
-  const shouldInititialize =
-    window.location.href == ("https://www.lastbottlewines.com/") || window.location.href.includes("https://www.lastbottlewines.com/product/detail/");
-  if (!shouldInititialize) {
-    return;
+// ─── Wine name detection ────────────────────────────────────────────────────
+
+function extractWineName() {
+  const candidates = [];
+
+  // 1. Primary: the page's h1 (Shopify product pages have exactly one h1 — the product name)
+  const h1 = document.querySelector('h1');
+  if (h1) candidates.push(h1.textContent);
+
+  // 2. Common Shopify / LastBottle product title selectors
+  const selectors = [
+    '.product__title',
+    '.product-title',
+    '.product-single__title',
+    '[data-product-title]',
+    '.offer-name',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) candidates.push(el.textContent);
   }
-  appendRating();
+
+  // 3. Open Graph title meta tag
+  const ogTitle = document.querySelector('meta[property="og:title"]');
+  if (ogTitle) candidates.push(ogTitle.getAttribute('content'));
+
+  // 4. Standard title meta tag
+  const metaTitle = document.querySelector('meta[name="title"]');
+  if (metaTitle) candidates.push(metaTitle.getAttribute('content'));
+
+  // 5. Page <title> element (strip common site suffixes)
+  if (document.title) {
+    candidates.push(
+      document.title
+        .replace(/\s*[|\-–—]\s*Last Bottle.*/i, '')
+        .replace(/\s*Wine\s*[-–]\s*Last Bottle.*/i, '')
+    );
+  }
+
+  // Pick the first non-empty candidate and clean it up
+  for (const raw of candidates) {
+    const name = cleanWineName(raw);
+    if (name) return name;
+  }
+
+  return null;
 }
 
-//Update the LastBottle DOM with results from Vivino
-async function appendRating() {
+function cleanWineName(raw) {
+  if (!raw) return null;
+  let name = raw.trim();
 
-  //Get the name of the wine being offered using the class of the tag. There should only be one.
-  let sWineName = document.getElementsByClassName('offer-name')[0].innerHTML;
-  //To maxmize likelihood of finding a match, remove reference to a specific vintage if one exists.
-  if(!isNaN(sWineName.substring(sWineName.length - 4, sWineName.length))){sWineName = sWineName.substring(0, sWineName.length - 4);}
-  //Clean up the string by removing any references to the wine being non-vintage
-  sWineName = sWineName.replace('NV','').replace('N.V.','');
-  //Finally, trim white space from the string
-  sWineName = sWineName.trim();
+  // Strip image alt-style suffixes like "Wine - Last Bottle"
+  name = name.replace(/\s*Wine\s*[-–]\s*Last Bottle.*/i, '').trim();
 
-  //If we were unable to get the name of the wine being offered, abort mission
-  if (!sWineName) {
+  // Remove trailing 4-digit vintage year (we search without it for broader results)
+  if (/\d{4}$/.test(name)) {
+    name = name.slice(0, -4).trim();
+  }
+
+  // Remove non-vintage markers
+  name = name.replace(/\bN\.?V\.?\b/gi, '').trim();
+
+  return name || null;
+}
+
+// ─── Sidebar UI ─────────────────────────────────────────────────────────────
+
+function createSidebar() {
+  const host = document.createElement('div');
+  host.id = SIDEBAR_ID;
+  host.style.cssText = `
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: ${SIDEBAR_WIDTH};
+    height: 100vh;
+    z-index: 2147483647;
+    font-family: sans-serif;
+  `;
+  document.body.appendChild(host);
+  document.body.style.marginRight = SIDEBAR_WIDTH;
+
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  shadow.innerHTML = `
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      :host { display: block; }
+
+      #panel {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: 100vh;
+        background: #fff;
+        box-shadow: -3px 0 12px rgba(0,0,0,0.18);
+        overflow: hidden;
+      }
+
+      #header {
+        flex-shrink: 0;
+        background: #6B1A2B;
+        color: #fff;
+        padding: 14px 16px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      #header svg { flex-shrink: 0; }
+
+      #header-text {
+        flex: 1;
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+      }
+
+      #wine-query {
+        font-size: 10px;
+        font-weight: 400;
+        opacity: 0.75;
+        margin-top: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+
+      /* Loading */
+      #loading {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        gap: 12px;
+        color: #888;
+        font-size: 13px;
+      }
+
+      .spinner {
+        width: 32px;
+        height: 32px;
+        border: 3px solid #e0e0e0;
+        border-top-color: #6B1A2B;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* Error */
+      #error {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        gap: 8px;
+        color: #888;
+        font-size: 13px;
+        text-align: center;
+        padding: 20px;
+      }
+
+      #error strong { color: #6B1A2B; font-size: 14px; }
+
+      /* Empty */
+      #empty {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        flex: 1;
+        gap: 8px;
+        color: #888;
+        font-size: 13px;
+        text-align: center;
+        padding: 20px;
+      }
+
+      /* Results */
+      #results { display: none; flex-direction: column; gap: 12px; }
+
+      .card {
+        border: 1px solid #e8e8e8;
+        border-radius: 8px;
+        overflow: hidden;
+        background: #fafafa;
+      }
+
+      .card-img-wrap {
+        background: #f5f0eb;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 160px;
+        overflow: hidden;
+      }
+
+      .card-img-wrap img {
+        height: 150px;
+        width: auto;
+        object-fit: contain;
+        display: block;
+      }
+
+      .card-img-wrap.no-img { display: none; }
+
+      .card-body { padding: 10px 12px; }
+
+      .card-name {
+        font-size: 13px;
+        font-weight: 600;
+        color: #1a1a1a;
+        line-height: 1.3;
+        margin-bottom: 8px;
+      }
+
+      .card-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+        color: #444;
+        margin-bottom: 10px;
+      }
+
+      .stat-row { display: flex; align-items: center; gap: 6px; }
+      .stat-label { font-weight: 600; min-width: 80px; color: #666; }
+
+      .stars { color: #c0392b; letter-spacing: 1px; font-size: 13px; }
+      .rating-count { color: #888; font-size: 11px; }
+
+      .price-val {
+        font-weight: 700;
+        font-size: 14px;
+        color: #6B1A2B;
+      }
+
+      .price-sub { font-size: 10px; color: #888; }
+
+      .card-link {
+        display: inline-block;
+        font-size: 11px;
+        color: #6B1A2B;
+        text-decoration: none;
+        border: 1px solid #6B1A2B;
+        border-radius: 4px;
+        padding: 4px 10px;
+        transition: background 0.15s, color 0.15s;
+      }
+
+      .card-link:hover { background: #6B1A2B; color: #fff; }
+
+      #footer {
+        flex-shrink: 0;
+        padding: 8px 12px;
+        font-size: 10px;
+        color: #bbb;
+        border-top: 1px solid #eee;
+        text-align: center;
+      }
+
+      #footer a { color: #bbb; }
+    </style>
+
+    <div id="panel">
+      <div id="header">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C8 2 5 5.5 5 9c0 3 1.5 5.5 4 6.7V20H8v2h8v-2h-1v-4.3C17.5 14.5 19 12 19 9c0-3.5-3-7-7-7z" fill="rgba(255,255,255,0.9)"/>
+        </svg>
+        <div>
+          <div id="header-text">Vivino Market Prices</div>
+          <div id="wine-query"></div>
+        </div>
+      </div>
+
+      <div id="body">
+        <div id="loading">
+          <div class="spinner"></div>
+          <span>Searching Vivino…</span>
+        </div>
+
+        <div id="error">
+          <strong>Couldn't load results</strong>
+          <span id="error-msg"></span>
+        </div>
+
+        <div id="empty">
+          <strong>No matches found</strong>
+          <span>Vivino returned no results for this wine.</span>
+        </div>
+
+        <div id="results"></div>
+      </div>
+
+      <div id="footer">
+        Prices sourced from <a href="https://www.vivino.com" target="_blank">Vivino</a>
+      </div>
+    </div>
+  `;
+
+  return shadow;
+}
+
+function renderStars(rating) {
+  if (rating === null || isNaN(rating)) return '—';
+  const full = Math.round(rating);
+  return '★'.repeat(full) + '☆'.repeat(Math.max(0, 5 - full));
+}
+
+function formatPrice(val) {
+  if (val === null || val === undefined) return '—';
+  const n = parseFloat(val);
+  return isNaN(n) ? '—' : `$${n.toFixed(2)}`;
+}
+
+function renderResults(shadow, wines) {
+  const loading = shadow.getElementById('loading');
+  const error = shadow.getElementById('error');
+  const empty = shadow.getElementById('empty');
+  const results = shadow.getElementById('results');
+
+  loading.style.display = 'none';
+
+  if (!wines || wines.length === 0) {
+    empty.style.display = 'flex';
     return;
   }
+
+  results.style.display = 'flex';
+
+  for (const wine of wines) {
+    const hasImage = !!wine.imageUrl;
+    const hasRating = wine.ratingsAverage !== null && !isNaN(wine.ratingsAverage);
+    const medianPrice = formatPrice(wine.pricing && wine.pricing.median);
+    const bestPrice = formatPrice(wine.pricing && wine.pricing.best);
+
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="card-img-wrap${hasImage ? '' : ' no-img'}">
+        ${hasImage ? `<img src="${wine.imageUrl}" alt="${escapeHtml(wine.name)}" loading="lazy">` : ''}
+      </div>
+      <div class="card-body">
+        <div class="card-name">${escapeHtml(wine.name)}</div>
+        <div class="card-stats">
+          <div class="stat-row">
+            <span class="stat-label">Rating</span>
+            ${hasRating
+              ? `<span class="stars">${renderStars(wine.ratingsAverage)}</span>
+                 <span>${wine.ratingsAverage.toFixed(1)}</span>
+                 <span class="rating-count">(${Number(wine.ratingsCount).toLocaleString()})</span>`
+              : '<span>—</span>'
+            }
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Market avg</span>
+            <span class="price-val">${medianPrice}</span>
+          </div>
+          <div class="stat-row">
+            <span class="stat-label">Best price</span>
+            <span class="price-val">${bestPrice}</span>
+            <span class="price-sub">online</span>
+          </div>
+        </div>
+        ${wine.wineUrl
+          ? `<a class="card-link" href="${wine.wineUrl}" target="_blank">View on Vivino ↗</a>`
+          : ''
+        }
+      </div>
+    `;
+    results.appendChild(card);
+  }
+}
+
+function showError(shadow, message) {
+  shadow.getElementById('loading').style.display = 'none';
+  const errorEl = shadow.getElementById('error');
+  errorEl.style.display = 'flex';
+  shadow.getElementById('error-msg').textContent = message || '';
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// ─── Entry point ─────────────────────────────────────────────────────────────
+
+function shouldRun() {
+  const href = window.location.href;
+  return (
+    href === 'https://www.lastbottlewines.com/' ||
+    href.startsWith('https://www.lastbottlewines.com/products/') ||
+    href.includes('https://www.lastbottlewines.com/product/detail/')
+  );
+}
+
+async function initialize() {
+  if (!shouldRun()) return;
+  if (document.getElementById(SIDEBAR_ID)) return;
+
+  const shadow = createSidebar();
+
+  const wineName = extractWineName();
+  if (!wineName) {
+    showError(shadow, 'Could not detect the wine name on this page.');
+    return;
+  }
+
+  shadow.getElementById('wine-query').textContent = wineName;
 
   try {
-    //Get rating, review, name, id, image, and link from Vivino
-    const bodyHTML = await getRating(sWineName);
-    //Parse the HTML and return array of results
-    const wines = extractRating(bodyHTML);
-
-    //Get the price value to show in the header. Handle cases where there are no results.
-    //For the header, we round the price to the nearest dollar.
-    let sPrice = 'N/A';
-    if(wines.length>0){
-      sPrice = await getPrice(wines[0]['parentID']);
-      if(!isNaN(sPrice) && sPrice !== null){
-          sPrice = (Math.round(sPrice * 100) / 100).toFixed(0);
-      }
-    }
-
-    //Inject Vivino price into LastBottle
-    let iPriceElements = document.getElementsByClassName('price-holder').length - 1;
-    let sPriceDiv = '<div class="price-holder"><div class="strikethrough default"><em style="color:#ed1c24">$</em><span class="amount" style="color:#ed1c24">' + sPrice + '</span></div><p style="color:#ed1c24">Vivino</p></div>';
-    document.getElementsByClassName('price-holder')[iPriceElements].innerHTML = sPriceDiv + document.getElementsByClassName('price-holder')[iPriceElements].innerHTML;
-
-    //Update the offer-stats div to include a tab that lists the matches from Vivino
-    document.getElementById("myTab").innerHTML += '<li class="nav-item offer-tab" role="menuitem" style="width: 33.3%;"><a class="" id="vivino-tab" data-toggle="tab" href="#vivino" role="tab" aria-controls="vivino" data-uw-rm-brl="false" aria-selected="false">Vivino Results</a></li>';
-    //Resize those tabs
-    const tabs = document.querySelectorAll('.offer-tab');
-    tabs.forEach(tab => {
-      tab.style.width = '33.3%';
-    });
-
-    //Add vivino tab panel content
-    if(!wines){
-      document.getElementById("myTabContent").innerHTML += '<div class="tab-pane fade" id="vivino" role="tabpanel" aria-labelledby="vivino"><div class="text-left"><p data-uw-rm-sr="">No matches found on Vivino. <br role="presentation" data-uw-rm-sr=""></p></div></div>';
-    } else{
-      var sTabHTML;
-      sTabHTML = '<div class="tab-pane fade" id="vivino" role="tabpanel" aria-labelledby="vivino"><div class="text-left"><p data-uw-rm-sr="">';
-      sTabHTML += '<section class="details-pane"></section>';
-      //Declare some variables and then loop through the result set
-      var resultName;
-      var resultParentID;
-      var resultPrice;
-      var resultScore = 'No ratings';
-      var resultNumOfReviews;
-      var resultImage;
-      var resultTrimmedImage;
-      var resultURL;
-      var ratingsDesc;
-
-      //Show a maximum of 5 results. This is a somewhat arbitrary decision but made for a few reasons.
-      // 1. To reduce the time to render results on page
-      // 2. To be mindful of making too many API calls to Vivino
-      // 3. After the first 5 results, the probability of finding a match drops off sharply
-      let i = 0;
-      while (i < wines.length && i<5){
-        //Get values
-        resultName = wines[i]['name'];
-        resultParentID = wines[i]['parentID'];
-        //Make async call go get price
-        resultPrice = await getPrice(resultParentID);
-        resultScore = wines[i]['score'];
-        resultNumOfReviews = wines[i]['numOfReviews'];
-        resultTrimmedImage = wines[i]['trimmedImage'];
-        resultURL = wines[i]['url'];
-        //Apply some formatting
-        if(!isNaN(resultPrice)){
-          resultPrice = '$ ' +resultPrice;
-        }
-        if(!isNaN(resultScore) && resultScore !== null){
-          ratingsDesc = resultScore + '<strong>&#9733;</strong> (' + resultNumOfReviews + ' ratings)';
-        }
-        
-        //Construct HTML
-        sTabHTML += '<section class="details-pane"><h3 data-uw-rm-heading="level" role="heading" aria-level="2">' + resultName + '</h3>';
-        sTabHTML += '<img src="' + resultTrimmedImage + '" alt="' + resultName + '" style="height:300px !important;width:auto !important;">';
-        sTabHTML += '<ul class="tech-details">';
-        sTabHTML += '<li><strong>Average Price</strong>: ' + resultPrice + '</li>';
-        sTabHTML += '<li><strong>Average Rating</strong>: ' + ratingsDesc + '</li>';
-        sTabHTML += '<li><strong>Additional Details</strong>: <a href="' + resultURL + '" target="_blank">Click here</a></li>';
-        sTabHTML += '</ul>';
-        sTabHTML += '</section>';
-
-        i++;
-      };
-      //Close out div and inject HTML
-      sTabHTML += '<br role="presentation" data-uw-rm-sr="">';
-      sTabHTML += '</p></div></div>';
-      document.getElementById("myTabContent").innerHTML += sTabHTML;
-
-    }
-    
-
-  } catch (e) {
-    console.log(`${sWineName} is not found on Vivino`);
+    const wines = await search(wineName);
+    renderResults(shadow, wines);
+  } catch (err) {
+    showError(shadow, 'Failed to reach the Vivino API.');
+    console.error('[Vivino sidebar]', err);
   }
 }
 
-
-//Parse the search results HTML from Vivino and return them as an array.
-const extractRating = (html) => {
-
-    //Convert HTML String to Document
-    var doc = new DOMParser().parseFromString(html, "text/html");
-    
-    // Get elements with class "card"
-    let elements = doc.getElementsByClassName("card");
-
-    // Store data on wines in an array
-    let wines = [];
-
-    // Iterate through the search result cards to get values
-    for (let i = 0; i < elements.length; i++) {
-      // Prevent errors by looping through the desired elements if they exist.  Allow max 1 result.
-      
-      // Get the wine name
-      const nameElements = elements[i].getElementsByClassName("wine-card__name");
-      let name = "";
-      for (let j = 0; j < nameElements.length && j<1; j++) {
-        name = nameElements[j].textContent.trim();
-      }
-
-      // Get the wine rating
-      const scoreElements = elements[i].getElementsByClassName("average__number");
-      let score = "";
-      for (let j = 0; j < scoreElements.length && j<1; j++) {
-        score = scoreElements[j].textContent.trim();
-      }
-      
-      // Get the number of ratings
-      const numOfReviewsElements = elements[i].getElementsByClassName("average__stars");
-      let numOfReviews = "";
-      for (let j = 0; j < numOfReviewsElements.length && j<1; j++) {
-        numOfReviews = numOfReviewsElements[j].textContent.replace("ratings","").trim();
-      }
-      
-      // Get the wine image
-      const imageCSSElements = elements[i].getElementsByClassName("wine-card__image");
-      let imageCSS = "", image = "", trimmedImage = "";
-      for (let j = 0; j < imageCSSElements.length && j<1; j++) {
-        imageCSS = imageCSSElements[j].style.backgroundImage;
-        //Get the url from the text
-        image = imageCSS.replace(/^url\(["']?/, '').replace(/["']?\)$/, '');
-        //This gets the equivalent image that's used on the product details page. This one is trimmed of white space. 
-        trimmedImage = image.replace('300x300','x600');
-      }
-
-      // Get the link to the wine's details page
-      const hrefElements = elements[i].getElementsByTagName("a");
-      let href = "", url="";
-      for (let j = 0; j < hrefElements.length && j<1; j++) {
-        href = hrefElements[j].getAttribute("href");
-        url = 'https://www.vivino.com' + href;
-      }
-
-      // Get the wine's ID from the data in the URL
-      let id = url.split("/").pop();
-
-      // Get the wine's parent ID
-      const parentIDElements = elements[i].getElementsByClassName("default-wine-card");
-      let parentID = "";
-      for (let j = 0; j < parentIDElements.length; j++) {
-        parentID = parentIDElements[j].getAttribute("data-wine");
-      }
-
-      //NOTE: The price isn't populated on the page itself.  We have to make a seprate call for that.
-
-      //If there is no wine name in this iteration, go ahead and return what we have in the array from previous iterations
-      if (!name) {
-        return;
-      }
-      
-      //Push the results from this iteration into the array
-      wines.push({
-        id,
-        parentID,
-        name,
-        score: parseFloat(score),
-        numOfReviews: parseFloat(numOfReviews),
-        image,
-        trimmedImage,
-        url,
-      });
-
-      //End loop
-    }
-
-    return wines;
-    
-};
-
-//Add an event listener to the page
-window.addEventListener("load", initializeScript);
-
-
+// Run on DOM ready; retry on full load in case the page hydrates lazily
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initialize);
+} else {
+  initialize();
+}
