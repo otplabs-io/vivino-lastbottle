@@ -271,25 +271,18 @@ function createSidebar() {
 
       .card-link:hover { background: #6B1A2B; color: #fff; }
 
-      #footer {
-        flex-shrink: 0;
-        padding: 8px 12px;
-        font-size: 10px;
-        color: #bbb;
-        border-top: 1px solid #eee;
-        text-align: center;
-      }
-
-      #footer a { color: #bbb; }
     </style>
 
     <div id="panel">
       <div id="header">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2C8 2 5 5.5 5 9c0 3 1.5 5.5 4 6.7V20H8v2h8v-2h-1v-4.3C17.5 14.5 19 12 19 9c0-3.5-3-7-7-7z" fill="rgba(255,255,255,0.9)"/>
+          <path d="M12 2l1.09 3.26L16.5 4.5l-2.15 2.65L15.5 11l-3.5-2-3.5 2 1.15-3.85L7.5 4.5l3.41.76L12 2z" fill="rgba(255,255,255,0.95)"/>
+          <path d="M5 12l.6 1.8L7.5 14l-1.9.2L5 16l-.6-1.8L2.5 14l1.9-.2L5 12z" fill="rgba(255,255,255,0.85)"/>
+          <path d="M19 5l.6 1.8L21.5 7l-1.9.2L19 9l-.6-1.8L16.5 7l1.9-.2L19 5z" fill="rgba(255,255,255,0.85)"/>
+          <path d="M18 16l.45 1.35L19.88 18l-1.43.65L18 20l-.45-1.35L16.12 18l1.43-.65L18 16z" fill="rgba(255,255,255,0.7)"/>
         </svg>
         <div>
-          <div id="header-text">Vivino Market Prices</div>
+          <div id="header-text">Market Prices</div>
           <div id="wine-query"></div>
         </div>
       </div>
@@ -297,7 +290,7 @@ function createSidebar() {
       <div id="body">
         <div id="loading">
           <div class="spinner"></div>
-          <span>Searching Vivino…</span>
+          <span>Searching…</span>
         </div>
 
         <div id="error">
@@ -307,14 +300,10 @@ function createSidebar() {
 
         <div id="empty">
           <strong>No matches found</strong>
-          <span>Vivino returned no results for this wine.</span>
+          <span>No results found for this wine.</span>
         </div>
 
         <div id="results"></div>
-      </div>
-
-      <div id="footer">
-        Prices sourced from <a href="https://www.vivino.com" target="_blank">Vivino</a>
       </div>
     </div>
   `;
@@ -382,10 +371,6 @@ function renderResults(shadow, wines) {
             <span class="price-sub">online</span>
           </div>
         </div>
-        ${wine.wineUrl
-          ? `<a class="card-link" href="${wine.wineUrl}" target="_blank">View on Vivino ↗</a>`
-          : ''
-        }
       </div>
     `;
     results.appendChild(card);
