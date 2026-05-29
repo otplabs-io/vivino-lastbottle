@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "dKk3k_gvNF0vrljSCg-zp"
+uri = "file://vivino-lastbottle-v2.zip"
+type = "unspecified"
+title = "vivino-lastbottle-v2.zip"
