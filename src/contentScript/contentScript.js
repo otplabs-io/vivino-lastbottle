@@ -334,7 +334,6 @@ function formatPrice(val) {
 
 function renderResults(shadow, wines) {
   const loading = shadow.getElementById('loading');
-  const error = shadow.getElementById('error');
   const empty = shadow.getElementById('empty');
   const results = shadow.getElementById('results');
 

@@ -177,11 +177,17 @@ export default async function search(wineName) {
   }
 
   return wines.map(function(wine) {
-    return Object.assign({}, wine, {
+    return {
+      id: wine.id,
+      name: wine.name,
+      ratingsAverage: wine.ratingsAverage,
+      ratingsCount: wine.ratingsCount,
+      imageUrl: wine.imageUrl,
+      wineUrl: wine.wineUrl,
       pricing: {
         median: medianMap[wine.id] || null,
         best: wine.bestPrice,
       },
-    });
+    };
   });
 }
