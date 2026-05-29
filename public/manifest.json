@@ -10,7 +10,10 @@
   "host_permissions": ["*://www.vivino.com/*", "*://api.vivino.com/*"],
   "content_scripts": [
     {
-      "matches": ["https://www.lastbottlewines.com/*"],
+      "matches": [
+        "https://lastbottlewines.com/*",
+        "https://www.lastbottlewines.com/*"
+      ],
       "js": ["contentScript.js"]
     }
   ],

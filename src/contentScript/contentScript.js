@@ -3,6 +3,8 @@ import search from './api/search';
 const SIDEBAR_WIDTH = '300px';
 const SIDEBAR_ID = 'vivino-sidebar-host';
 
+console.log('[Vivino] Content script loaded on', window.location.href);
+
 // ─── Wine name detection ────────────────────────────────────────────────────
 
 function extractWineName() {
@@ -408,21 +410,31 @@ function escapeHtml(str) {
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 function shouldRun() {
-  const href = window.location.href;
-  return (
-    href === 'https://www.lastbottlewines.com/' ||
-    href.startsWith('https://www.lastbottlewines.com/products/') ||
-    href.includes('https://www.lastbottlewines.com/product/detail/')
+  const { pathname } = window.location;
+  const result = (
+    pathname === '/' ||
+    pathname.startsWith('/products/') ||
+    pathname.startsWith('/product/detail/')
   );
+  console.log('[Vivino] shouldRun check — pathname:', pathname, '→', result);
+  return result;
 }
 
 async function initialize() {
+  console.log('[Vivino] initialize() called, readyState:', document.readyState);
+
   if (!shouldRun()) return;
-  if (document.getElementById(SIDEBAR_ID)) return;
+  if (document.getElementById(SIDEBAR_ID)) {
+    console.log('[Vivino] Sidebar already present, skipping.');
+    return;
+  }
 
   const shadow = createSidebar();
+  console.log('[Vivino] Sidebar created.');
 
   const wineName = extractWineName();
+  console.log('[Vivino] Wine name detected:', wineName);
+
   if (!wineName) {
     showError(shadow, 'Could not detect the wine name on this page.');
     return;
@@ -431,15 +443,17 @@ async function initialize() {
   shadow.getElementById('wine-query').textContent = wineName;
 
   try {
+    console.log('[Vivino] Searching for:', wineName);
     const wines = await search(wineName);
+    console.log('[Vivino] Search returned', wines && wines.length, 'results.');
     renderResults(shadow, wines);
   } catch (err) {
     showError(shadow, 'Failed to reach the Vivino API.');
-    console.error('[Vivino sidebar]', err);
+    console.error('[Vivino] Search error:', err);
   }
 }
 
-// Run on DOM ready; retry on full load in case the page hydrates lazily
+// Run on DOM ready; also listen for load in case Shopify hydrates content lazily
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initialize);
 } else {
