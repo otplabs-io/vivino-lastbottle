@@ -271,6 +271,16 @@ function createSidebar() {
 
       .card-link:hover { background: #6B1A2B; color: #fff; }
 
+      #notice {
+        flex-shrink: 0;
+        padding: 8px 12px;
+        background: #fdf8f0;
+        border-bottom: 1px solid #f0e6d0;
+        font-size: 11px;
+        color: #999;
+        line-height: 1.5;
+      }
+
     </style>
 
     <div id="panel">
@@ -284,6 +294,10 @@ function createSidebar() {
           <div id="header-text">Market Prices</div>
           <div id="wine-query"></div>
         </div>
+      </div>
+
+      <div id="notice">
+        Results are auto-matched — give them a quick look to confirm they're the right wine before comparing prices.
       </div>
 
       <div id="body">
