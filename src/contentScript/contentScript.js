@@ -276,10 +276,9 @@ function createSidebar() {
     <div id="panel">
       <div id="header">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M12 2l1.09 3.26L16.5 4.5l-2.15 2.65L15.5 11l-3.5-2-3.5 2 1.15-3.85L7.5 4.5l3.41.76L12 2z" fill="rgba(255,255,255,0.95)"/>
-          <path d="M5 12l.6 1.8L7.5 14l-1.9.2L5 16l-.6-1.8L2.5 14l1.9-.2L5 12z" fill="rgba(255,255,255,0.85)"/>
-          <path d="M19 5l.6 1.8L21.5 7l-1.9.2L19 9l-.6-1.8L16.5 7l1.9-.2L19 5z" fill="rgba(255,255,255,0.85)"/>
-          <path d="M18 16l.45 1.35L19.88 18l-1.43.65L18 20l-.45-1.35L16.12 18l1.43-.65L18 16z" fill="rgba(255,255,255,0.7)"/>
+          <path d="M12 3L14.83 9.17L21 12L14.83 14.83L12 21L9.17 14.83L3 12L9.17 9.17Z" fill="rgba(255,255,255,0.95)"/>
+          <path d="M20 1.5L20.71 3.29L22.5 4L20.71 4.71L20 6.5L19.29 4.71L17.5 4L19.29 3.29Z" fill="rgba(255,255,255,0.85)"/>
+          <path d="M4 17L4.57 18.43L6 19L4.57 19.57L4 21L3.43 19.57L2 19L3.43 18.43Z" fill="rgba(255,255,255,0.75)"/>
         </svg>
         <div>
           <div id="header-text">Market Prices</div>
