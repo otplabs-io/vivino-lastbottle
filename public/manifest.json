@@ -1,6 +1,6 @@
 {
   "name": "LastBottle Assistant",
-  "version": "1.0",
+  "version": "2.0",
   "description": "See crowd-sourced ratings, reviews, prices, and more on LastBottleWines.com's daily offers.",
   "manifest_version": 3,
   "icons": {
