@@ -1,0 +1,12 @@
+# Replit environment config (kept local, not pushed)
+.replit
+replit.nix
+.upm/
+.config/
+.cache/
+
+# Dependencies
+node_modules/
+
+# Build output
+.parcel-cache/
